@@ -37,6 +37,7 @@ import com.amazonaws.services.ecs.model.LinuxParameters;
 import com.amazonaws.services.ecs.model.MountPoint;
 import com.amazonaws.services.ecs.model.NetworkMode;
 import com.amazonaws.services.ecs.model.PlacementStrategy;
+import com.amazonaws.services.ecs.model.TaskDefinitionPlacementConstraint;
 import com.amazonaws.services.ecs.model.PlacementStrategyType;
 import com.amazonaws.services.ecs.model.PortMapping;
 import com.amazonaws.services.ecs.model.RegisterTaskDefinitionRequest;
@@ -283,7 +284,7 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
     private List<PortMappingEntry> portMappings;
     private List<PlacementStrategyEntry> placementStrategies;
     private List<CapacityProviderStrategyEntry> capacityProviderStrategies;
-
+    private List<TaskPlacementConstraintEntry> taskPlacementConstraints;
 
     /**
     * The log configuration specification for the container.
@@ -338,7 +339,8 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
                            @Nullable List<PlacementStrategyEntry> placementStrategies,
                            @Nullable String taskrole,
                            @Nullable String inheritFrom,
-                           int sharedMemorySize) {
+                           int sharedMemorySize,
+                           @Nullable List<TaskPlacementConstraintEntry> taskPlacementConstraints) {
         // if the user enters a task definition override, always prefer to use it, rather than the jenkins template.
         if (taskDefinitionOverride != null && !taskDefinitionOverride.trim().isEmpty()) {
             this.taskDefinitionOverride = taskDefinitionOverride.trim();
@@ -383,6 +385,7 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         this.inheritFrom = inheritFrom;
         this.sharedMemorySize = sharedMemorySize;
         this.dynamicTaskDefinitionOverride = StringUtils.trimToNull(dynamicTaskDefinitionOverride);
+        this.taskPlacementConstraints = taskPlacementConstraints;
     }
 
     @DataBoundSetter
@@ -643,6 +646,10 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         return placementStrategies;
     }
 
+    public List<TaskPlacementConstraintEntry> getTaskPlacementConstraints() {
+        return taskPlacementConstraints;
+    }
+
     public List<CapacityProviderStrategyEntry> getCapacityProviderStrategies() {
         return capacityProviderStrategies;
     }
@@ -696,7 +703,7 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         List<PortMappingEntry> portMappings = isEmpty(this.portMappings) ? parent.getPortMappings() : this.portMappings;
         List<PlacementStrategyEntry> placementStrategies = isEmpty(this.placementStrategies) ? parent.getPlacementStrategies() : this.placementStrategies;
         List<CapacityProviderStrategyEntry> capacityProviderStrategies = isEmpty(this.capacityProviderStrategies) ? parent.getCapacityProviderStrategies() : this.capacityProviderStrategies;
-
+         List<TaskPlacementConstraintEntry> taskPlacementConstraints = isEmpty(this.taskPlacementConstraints) ? parent.getTaskPlacementConstraints() : this.taskPlacementConstraints;
         String executionRole = isNullOrEmpty(this.executionRole) ? parent.getExecutionRole() : this.executionRole;
         String taskrole = isNullOrEmpty(this.taskrole) ? parent.getTaskrole() : this.taskrole;
 
@@ -730,7 +737,8 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
                                                        placementStrategies,
                                                        taskrole,
                                                        null,
-                                                        sharedMemorySize);
+                                                       sharedMemorySize,
+                                                       taskPlacementConstraints);
         merged.setLogDriver(logDriver);
         merged.setEntrypoint(entrypoint);
 
@@ -854,6 +862,19 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
                                        .withBase(base));
         }
         return stragies;
+    }
+
+    Collection<TaskDefinitionPlacementConstraint> getPlacementConstraintEntries() {
+        if (null == taskPlacementConstraints || taskPlacementConstraints.isEmpty())
+            return null;
+        Collection<TaskDefinitionPlacementConstraint> constraints = new ArrayList<TaskDefinitionPlacementConstraint>();
+        for (TaskPlacementConstraintEntry placementConstraint : this.taskPlacementConstraints) {
+            String type = placementConstraint.type;
+            String expression = placementConstraint.expression;
+
+            constraints.add(new TaskDefinitionPlacementConstraint().withType(type).withExpression(expression));
+        }
+        return constraints;
     }
 
     public static class EnvironmentEntry extends AbstractDescribableImpl<EnvironmentEntry> implements Serializable {
@@ -1007,6 +1028,37 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
                     return FormValidation.error("Field needs to be set when using Type other then random");
                 }
                 return FormValidation.ok();
+            }
+        }
+    }
+
+
+    public static class TaskPlacementConstraintEntry extends AbstractDescribableImpl<TaskPlacementConstraintEntry> implements Serializable {
+    public String type, expression;
+
+        @DataBoundConstructor
+        public TaskPlacementConstraintEntry(String type, String expression) {
+            this.type = type;
+            this.expression = expression;
+        }
+
+        @Override
+        public String toString() {
+            return "TaskPlacementConstraintEntry{" + type + ": " + expression + "}";
+        }
+
+        @Extension
+        public static class DescriptorImpl extends Descriptor<TaskPlacementConstraintEntry> {
+            @Override
+            public String getDisplayName() {
+                return "TaskPlacementConstraintEntry";
+            }
+
+            public ListBoxModel doFillTypeItems() {
+                final ListBoxModel options = new ListBoxModel();
+                options.add("distinctInstance", "distinctInstance");
+                options.add("memberOf", "memberOf");
+                return options;
             }
         }
     }
@@ -1277,6 +1329,10 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         if (logDriverOptions != null ? !logDriverOptions.equals(that.logDriverOptions) : that.logDriverOptions != null) {
             return false;
         }
+
+        if (taskPlacementConstraints != null ? !taskPlacementConstraints.equals(that.taskPlacementConstraints) : that.taskPlacementConstraints != null) {
+            return false;
+        }
         return inheritFrom != null ? inheritFrom.equals(that.inheritFrom) : that.inheritFrom == null;
     }
 
@@ -1316,6 +1372,7 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         result = 31 * result + (logDriver != null ? logDriver.hashCode() : 0);
         result = 31 * result + (logDriverOptions != null ? logDriverOptions.hashCode() : 0);
         result = 31 * result + (inheritFrom != null ? inheritFrom.hashCode() : 0);
+        result = 31 * result + (taskPlacementConstraints != null ? taskPlacementConstraints.hashCode() : 0);
         return result;
     }
 }

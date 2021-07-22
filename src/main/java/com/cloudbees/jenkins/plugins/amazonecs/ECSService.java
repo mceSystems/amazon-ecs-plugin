@@ -323,7 +323,8 @@ public class ECSService {
             final RegisterTaskDefinitionRequest request = new RegisterTaskDefinitionRequest()
                     .withFamily(familyName)
                     .withVolumes(template.getVolumeEntries())
-                    .withContainerDefinitions(def);
+                    .withContainerDefinitions(def)
+                    .withPlacementConstraints(template.getPlacementConstraintEntries());
 
             //If network mode is default, that means Null in the request, so do not set.
             if (!StringUtils.equals(StringUtils.defaultString(template.getNetworkMode()), "default")) {

@@ -142,6 +142,23 @@
         </table>
       </f:repeatable>
     </f:entry>
+    <f:entry title="${%Task Placement Constraints}">
+      <f:repeatable field="taskPlacementConstraints">
+        <table width="100%">
+          <f:entry title="${%Type}" field="type">
+            <f:select />
+          </f:entry>
+          <f:entry title="${%Expression}" field="expression">
+            <f:textbox />
+          </f:entry>
+          <f:entry>
+            <div align="right">
+              <f:repeatableDeleteButton />
+            </div>
+          </f:entry>
+        </table>
+      </f:repeatable>
+    </f:entry>
     <f:entry title="${%Environments}">
       <f:repeatable field="environments">
         <table width="100%">

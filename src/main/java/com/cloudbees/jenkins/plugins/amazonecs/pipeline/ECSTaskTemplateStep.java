@@ -31,6 +31,7 @@ import com.cloudbees.jenkins.plugins.amazonecs.ECSTaskTemplate.MountPointEntry;
 import com.cloudbees.jenkins.plugins.amazonecs.ECSTaskTemplate.PortMappingEntry;
 import com.cloudbees.jenkins.plugins.amazonecs.ECSTaskTemplate.PlacementStrategyEntry;
 import com.cloudbees.jenkins.plugins.amazonecs.ECSTaskTemplate.CapacityProviderStrategyEntry;
+import com.cloudbees.jenkins.plugins.amazonecs.ECSTaskTemplate.TaskPlacementConstraintEntry;
 import com.google.common.collect.ImmutableSet;
 import hudson.model.Run;
 import java.util.logging.Level;
@@ -76,6 +77,7 @@ public class ECSTaskTemplateStep extends Step implements Serializable {
     private List<PortMappingEntry> portMappings;
     private List<PlacementStrategyEntry> placementStrategies;
     private List<CapacityProviderStrategyEntry> capacityProviderStrategies;
+    List<TaskPlacementConstraintEntry> taskPlacementConstraints;
 
     private List<String> overrides;
 
@@ -372,6 +374,15 @@ public class ECSTaskTemplateStep extends Step implements Serializable {
 
     public List<String> getOverrides() {
         return overrides;
+    }
+
+    @DataBoundSetter
+    public void setTaskPlacementConstraints(List<TaskPlacementConstraintEntry> taskPlacementConstraints) {
+        this.taskPlacementConstraints = taskPlacementConstraints;
+    }
+
+    List<TaskPlacementConstraintEntry> getTaskPlacementConstraints() {
+        return this.taskPlacementConstraints;
     }
 
     @Override
