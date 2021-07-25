@@ -31,6 +31,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -51,6 +52,7 @@ import com.amazonaws.services.ecs.model.ListClustersResult;
 import com.amazonaws.services.ecs.model.TaskDefinition;
 import com.cloudbees.jenkins.plugins.amazonecs.pipeline.TaskTemplateMap;
 import com.cloudbees.jenkins.plugins.awscredentials.AWSCredentialsHelper;
+import com.cloudbees.jenkins.plugins.amazonecs.InProvisioning;
 
 import org.apache.commons.lang.RandomStringUtils;
 import org.apache.commons.lang.StringUtils;
@@ -256,24 +258,22 @@ public class ECSCloud extends Cloud {
 
         LOGGER.log(Level.INFO, "Asked to provision {0} agent(s) for: {1}", new Object[]{excessWorkload, label});
 
+        Set<String> allInProvisioning = InProvisioning.getAllInProvisioning(label);
+        LOGGER.log(Level.INFO, "In provisioning : " + allInProvisioning);
+        int toBeProvisioned = Math.max(0, excessWorkload - allInProvisioning.size());
+        LOGGER.log(Level.INFO, "Excess workload after pending ECS agents: {0}", toBeProvisioned);
+
         List<NodeProvisioner.PlannedNode> result = new ArrayList<>();
         final ECSTaskTemplate template = getTemplate(label);
         if (template != null) {
             String parentLabel = template.getInheritFrom();
             final ECSTaskTemplate merged = template.merge(getTemplate(parentLabel));
 
-            for (int i = 1; i <= excessWorkload; i++) {
+            for (int i = 1; i <= toBeProvisioned; i++) {
                 String agentName = name + "-" + label.getName() + "-" + RandomStringUtils.random(5, "bcdfghjklmnpqrstvwxz0123456789");
                 LOGGER.log(Level.INFO, "Will provision {0}, for label: {1}", new Object[]{agentName, label} );
-                result.add(
-                        new NodeProvisioner.PlannedNode(
-                                agentName,
-                                Computer.threadPoolForRemoting.submit(
-                                        new ProvisioningCallback(merged, agentName)
-                                ),
-                                1
-                        )
-                );
+
+                result.add(new NodeProvisioner.PlannedNode(template.getDisplayName(), Computer.threadPoolForRemoting.submit(new ProvisioningCallback(merged, agentName)), 1));
             }
         }
         return result.isEmpty() ? Collections.emptyList() : result;
