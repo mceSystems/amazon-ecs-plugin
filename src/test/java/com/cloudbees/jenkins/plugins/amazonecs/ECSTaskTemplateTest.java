@@ -1,26 +1,31 @@
 package com.cloudbees.jenkins.plugins.amazonecs;
 
-import static org.junit.Assert.assertEquals;
+import com.amazonaws.services.ecs.model.Tag;
 import org.junit.Test;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import org.apache.commons.lang.builder.EqualsBuilder;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 
 public class ECSTaskTemplateTest {
 
     ECSTaskTemplate getParent() {
         return new ECSTaskTemplate(
                 "parent-name", "parent-label",
-                null, null, "parent-image", "parent-repository-credentials", "FARGATE", false, null, "parent-network-mode", "parent-remoteFSRoot",
-                false, null, 0, 0, 0, null, null, false, false,
-                "parent-containerUser", null, null, null, null, null, null, null, null, null, 0, null);
+                null, null, "parent-image", "parent-repository-credentials", "FARGATE", "LINUX", "X86_64",false, null, "parent-network-mode", "parent-remoteFSRoot",
+                false, null, 0, 0, 0, null, null, null, false, false,
+                "parent-containerUser", "parent-kernelCapabilities", null, null, null, null, null, null, null, null, null, null, 0, null, false, new HashMap<String,String>());
     }
 
     ECSTaskTemplate getChild(String parent) {
         return new ECSTaskTemplate(
                 "child-name", "child-label",
-                null, null, "child-image", "child-repository-credentials", "EC2", false, null, "child-network-mode", "child-remoteFSRoot",
-                false, null, 0, 0, 0, null, null, false, false,
-                "child-containerUser", null, null, null, null, null, null, null, null, parent, 0, null);
+                null, null, "child-image", "child-repository-credentials", "EC2", "LINUX", "X86_64",false, null, "child-network-mode", "child-remoteFSRoot",
+                false, null, 0, 0, 0, null, null, null, false, false,
+                "child-containerUser", "child-kernelCapabilities", null, null, null, null, null, null, null, null, null, parent, 0, null, false, new HashMap<String,String>());
     }
 
     @Test
@@ -31,9 +36,9 @@ public class ECSTaskTemplateTest {
 
         ECSTaskTemplate expected = new ECSTaskTemplate(
             "child-name", "child-label",
-            null, null, "child-image", "child-repository-credentials", "EC2", false, null, "child-network-mode", "child-remoteFSRoot",
-            false, null, 0, 0, 0, null, null, false, false,
-            "child-containerUser", null, null, null, null, null, null, null, null, null, 0, null);
+            null, null, "child-image", "child-repository-credentials", "EC2", "LINUX", "X86_64",false, null, "child-network-mode", "child-remoteFSRoot",
+            false, null, 0, 0, 0, null, null, null, false, false,
+            "child-containerUser", "child-kernelCapabilities", null, null, null, null, null, null, null, null, null, null, 0, null, false, new HashMap<String,String>());
 
 
         ECSTaskTemplate result = child.merge(parent);
@@ -48,9 +53,9 @@ public class ECSTaskTemplateTest {
 
         ECSTaskTemplate expected = new ECSTaskTemplate(
             "child-name", "child-label",
-            null, null, "child-image", "child-repository-credentials", "EC2", false, null, "child-network-mode", "child-remoteFSRoot",
-            false, null, 0, 0, 0, null, null, false, false,
-            "child-containerUser", null, null, null, null, null, null, null, null, null, 0, null);
+            null, null, "child-image", "child-repository-credentials", "EC2", "LINUX", "X86_64",false, null, "child-network-mode", "child-remoteFSRoot",
+            false, null, 0, 0, 0, null, null, null, false, false,
+            "child-containerUser", "child-kernelCapabilities", null, null, null, null, null, null, null, null, null, null, 0, null, false, new HashMap<String,String>());
 
         ECSTaskTemplate result = child.merge(parent);
 
@@ -64,9 +69,9 @@ public class ECSTaskTemplateTest {
 
         ECSTaskTemplate expected = new ECSTaskTemplate(
             "child-name", "child-label",
-            null, null, "child-image", "child-repository-credentials", "EC2", false, null, "child-network-mode", "child-remoteFSRoot",
-            false, null, 0, 0, 0, null, null, false, false,
-            "child-containerUser", null, null, null, null, null, null, null, null, null, 0, null);
+            null, null, "child-image", "child-repository-credentials", "EC2", "LINUX", "X86_64",false, null, "child-network-mode", "child-remoteFSRoot",
+            false, null, 0, 0, 0, null, null, null, false, false,
+            "child-containerUser", "child-kernelCapabilities", null, null, null, null, null, null, null, null, null, null, 0, null, false, new HashMap<String,String>());
 
         ECSTaskTemplate result = child.merge(null);
 
@@ -82,9 +87,9 @@ public class ECSTaskTemplateTest {
 
         ECSTaskTemplate expected = new ECSTaskTemplate(
                 "child-name", "child-label",
-                null, null, "child-image", "child-repository-credentials", "EC2", false, null, "child-network-mode", "child-remoteFSRoot",
-                false, null, 0, 0, 0, null, null, false, false,
-                "child-containerUser", null, null, null, null, null, null, null, null, null, 0, null);
+                null, null, "child-image", "child-repository-credentials", "EC2", "LINUX", "X86_64",false, null, "child-network-mode", "child-remoteFSRoot",
+                false, null, 0, 0, 0, null, null, null, false, false,
+                "child-containerUser", "child-kernelCapabilities", null, null, null, null, null, null, null, null, null, null, 0, null, false, new HashMap<String,String>());
 
         //Child entrypoint should equal to parent by default
         parent.setEntrypoint(entrypoint);
@@ -96,5 +101,7 @@ public class ECSTaskTemplateTest {
         child.setEntrypoint("/bin/false");
         expected.setEntrypoint("/bin/false");
         assertTrue(EqualsBuilder.reflectionEquals(expected, child.merge(parent)));
+
+        List<Tag> tags = expected.getTags();
     }
 }

@@ -28,10 +28,16 @@ package com.cloudbees.jenkins.plugins.amazonecs;
 import com.amazonaws.services.ecs.AmazonECS;
 import com.amazonaws.services.ecs.model.AwsVpcConfiguration;
 import com.amazonaws.services.ecs.model.ContainerDefinition;
+import com.amazonaws.services.ecs.model.EFSAuthorizationConfig;
+import com.amazonaws.services.ecs.model.EFSAuthorizationConfigIAM;
+import com.amazonaws.services.ecs.model.EFSTransitEncryption;
+import com.amazonaws.services.ecs.model.EFSVolumeConfiguration;
 import com.amazonaws.services.ecs.model.HostEntry;
 import com.amazonaws.services.ecs.model.HostVolumeProperties;
 import com.amazonaws.services.ecs.model.KeyValuePair;
 import com.amazonaws.services.ecs.model.LaunchType;
+import com.amazonaws.services.ecs.model.OSFamily;
+import com.amazonaws.services.ecs.model.CPUArchitecture;
 import com.amazonaws.services.ecs.model.CapacityProviderStrategyItem;
 import com.amazonaws.services.ecs.model.LinuxParameters;
 import com.amazonaws.services.ecs.model.MountPoint;
@@ -46,7 +52,12 @@ import com.amazonaws.services.ecs.model.Volume;
 import com.amazonaws.services.ecs.model.DescribeClustersRequest;
 import com.amazonaws.services.ecs.model.DescribeClustersResult;
 import com.amazonaws.services.ecs.model.Cluster;
+import com.amazonaws.services.ecs.model.Tag;
+
 import static com.google.common.base.Strings.isNullOrEmpty;
+import com.amazonaws.services.elasticfilesystem.model.AccessPointDescription;
+import com.amazonaws.services.elasticfilesystem.model.FileSystemDescription;
+import com.cloudbees.jenkins.plugins.amazonecs.aws.EFSService;
 import hudson.Extension;
 import hudson.RelativePath;
 import hudson.model.AbstractDescribableImpl;
@@ -56,6 +67,7 @@ import hudson.model.labels.LabelAtom;
 import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
 import static org.apache.commons.collections.CollectionUtils.isEmpty;
+import org.apache.commons.lang.BooleanUtils;
 import org.apache.commons.lang.StringUtils;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
@@ -71,12 +83,17 @@ import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Map.Entry;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import java.util.Collections;
 
@@ -158,6 +175,13 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
      * @see ContainerDefinition#withCpu(Integer)
      */
     private final int cpu;
+
+    /**
+     * The ephemeral storage settings to use for tasks run with the task definition.
+     *
+     * @see com.amazonaws.services.ecs.model.TaskDefinition#withEphemeralStorage
+     */
+    private Integer ephemeralStorageSizeInGiB;
 
     /**
      * Sets the size of Share Memory (in MiB) using the
@@ -242,9 +266,24 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
     private List<MountPointEntry> mountPoints;
 
     /**
+     * Container mount points connecting to EFS
+     */
+    private List<EFSMountPointEntry> efsMountPoints;
+
+    /**
      * Task launch type
      */
     private final String launchType;
+
+    /**
+     * Task operating system family type
+     */
+    private final String operatingSystemFamily;
+
+    /**
+     * Task CPU architecture type
+     */
+    private final String cpuArchitecture;
 
     /**
      * Use default capacity provider will omit launch types and capacity strategies
@@ -274,10 +313,21 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
     private final String platformVersion;
 
     /**
-     * User for conatiner
+     * Tags to be added to template & task
+     */
+    private HashMap<String,String> tags;
+
+    /**
+     * User for container
      */
     @Nullable
     private String containerUser;
+
+    /**
+     * List of kernel capabilities to be added
+     */
+    @Nullable
+    private String kernelCapabilities;
 
     private List<EnvironmentEntry> environments;
     private List<ExtraHostEntry> extraHosts;
@@ -308,6 +358,12 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
 
     private String inheritFrom;
 
+    /**
+     * Enable command execution during runtime (comparable to a `docker exec ...`).
+     * Cf. https://aws.amazon.com/blogs/containers/new-using-amazon-ecs-exec-access-your-containers-fargate-ec2/
+     */
+    private boolean enableExecuteCommand;
+
     @DataBoundConstructor
     public ECSTaskTemplate(String templateName,
                            @Nullable String label,
@@ -316,6 +372,8 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
                            String image,
                            @Nullable final String repositoryCredentials,
                            @Nullable String launchType,
+                           @Nullable String operatingSystemFamily,
+                           @Nullable String cpuArchitecture,
                            boolean defaultCapacityProvider,
                            @Nullable List<CapacityProviderStrategyEntry> capacityProviderStrategies,
                            String networkMode,
@@ -325,22 +383,27 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
                            int memory,
                            int memoryReservation,
                            int cpu,
+                           @Nullable Integer ephemeralStorageSizeInGiB,
                            @Nullable String subnets,
                            @Nullable String securityGroups,
                            boolean assignPublicIp,
                            boolean privileged,
                            @Nullable String containerUser,
+                           @Nullable String kernelCapabilities,
                            @Nullable List<LogDriverOption> logDriverOptions,
                            @Nullable List<EnvironmentEntry> environments,
                            @Nullable List<ExtraHostEntry> extraHosts,
                            @Nullable List<MountPointEntry> mountPoints,
+                           @Nullable List<EFSMountPointEntry> efsMountPoints,
                            @Nullable List<PortMappingEntry> portMappings,
                            @Nullable String executionRole,
                            @Nullable List<PlacementStrategyEntry> placementStrategies,
                            @Nullable String taskrole,
                            @Nullable String inheritFrom,
                            int sharedMemorySize,
-                           @Nullable List<TaskPlacementConstraintEntry> taskPlacementConstraints) {
+                           @Nullable List<TaskPlacementConstraintEntry> taskPlacementConstraints,
+                           boolean enableExecuteCommand,
+                           HashMap<String,String> tags) {
         // if the user enters a task definition override, always prefer to use it, rather than the jenkins template.
         if (taskDefinitionOverride != null && !taskDefinitionOverride.trim().isEmpty()) {
             this.taskDefinitionOverride = taskDefinitionOverride.trim();
@@ -365,7 +428,10 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         this.memory = memory;
         this.memoryReservation = memoryReservation;
         this.cpu = cpu;
+        this.ephemeralStorageSizeInGiB = ephemeralStorageSizeInGiB;
         this.launchType = launchType;
+        this.operatingSystemFamily = operatingSystemFamily;
+        this.cpuArchitecture = cpuArchitecture;
         this.defaultCapacityProvider = defaultCapacityProvider;
         this.capacityProviderStrategies = capacityProviderStrategies;
         this.networkMode = networkMode;
@@ -374,10 +440,12 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         this.assignPublicIp = assignPublicIp;
         this.privileged = privileged;
         this.containerUser = StringUtils.trimToNull(containerUser);
+        this.kernelCapabilities = StringUtils.trimToNull(kernelCapabilities);
         this.logDriverOptions = logDriverOptions;
         this.environments = environments;
         this.extraHosts = extraHosts;
         this.mountPoints = mountPoints;
+        this.efsMountPoints = efsMountPoints;
         this.portMappings = portMappings;
         this.executionRole = executionRole;
         this.placementStrategies = placementStrategies;
@@ -386,6 +454,8 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         this.sharedMemorySize = sharedMemorySize;
         this.dynamicTaskDefinitionOverride = StringUtils.trimToNull(dynamicTaskDefinitionOverride);
         this.taskPlacementConstraints = taskPlacementConstraints;
+        this.enableExecuteCommand = enableExecuteCommand;
+        this.tags = (tags == null ? new HashMap<String,String>() : tags);
     }
 
     @DataBoundSetter
@@ -424,6 +494,11 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
     }
 
     @DataBoundSetter
+    public void setKernelCapabilities(String kernelCapabilities) {
+        this.kernelCapabilities = StringUtils.trimToNull(kernelCapabilities);
+    }
+
+    @DataBoundSetter
     public void setLogDriver(String logDriver) {
         this.logDriver = StringUtils.trimToNull(logDriver);
     }
@@ -455,6 +530,10 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
             return false;
         }
         return StringUtils.trimToNull(this.launchType) != null && launchType.equals(LaunchType.FARGATE.toString());
+    }
+
+    public boolean isEC2() {
+        return StringUtils.trimToNull(this.launchType) != null && launchType.equals(LaunchType.EC2.toString());
     }
 
     public String getLabel() {
@@ -506,6 +585,10 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
 
     public int getSharedMemorySize() { return sharedMemorySize; }
 
+    public Integer getEphemeralStorageSizeInGiB() {
+        return ephemeralStorageSizeInGiB;
+    }
+
     public String getSubnets() {
         return subnets;
     }
@@ -554,12 +637,34 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         return containerUser;
     }
 
+    public String getKernelCapabilities() {
+        return kernelCapabilities;
+    }
+
     public String getLaunchType() {
         if (StringUtils.trimToNull(this.launchType) == null) {
-            return LaunchType.EC2.toString();
+            return LaunchType.
+                    EC2.toString();
         }
         return launchType;
     }
+
+    public String getOperatingSystemFamily() {
+        if (StringUtils.trimToNull(this.operatingSystemFamily) == null) {
+            return OSFamily.
+                    LINUX.toString();
+        }
+        return operatingSystemFamily;
+    }
+
+    public String getCpuArchitecture() {
+        if (StringUtils.trimToNull(this.cpuArchitecture) == null) {
+            return CPUArchitecture.
+                    X86_64.toString();
+        }
+        return cpuArchitecture;
+    }
+
 
     public String getNetworkMode() {
         return networkMode;
@@ -574,6 +679,18 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
     }
 
     public String getTemplateName() {return templateName; }
+
+    public boolean isEnableExecuteCommand() {
+        return enableExecuteCommand;
+    }
+
+    public List<Tag> getTags() {
+        List<Tag> tagList= new ArrayList<Tag>();
+        for(Entry<String, String> entry: tags.entrySet()) {
+            tagList.add(new Tag().withKey(entry.getKey()).withValue(entry.getValue()));
+        }
+        return tagList;
+    }
 
     @Override
     public String toString() {
@@ -672,6 +789,8 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         String image = isNullOrEmpty(this.image) ? parent.getImage() : this.image;
         String repositoryCredentials = isNullOrEmpty(this.repositoryCredentials) ? parent.getRepositoryCredentials() : this.repositoryCredentials;
         String launchType = isNullOrEmpty(this.launchType) ? parent.getLaunchType() : this.launchType;
+        String operatingSystemFamily = isNullOrEmpty(this.operatingSystemFamily) ? parent.getOperatingSystemFamily() : this.operatingSystemFamily;
+        String cpuArchitecture = isNullOrEmpty(this.cpuArchitecture) ? parent.getCpuArchitecture() : this.cpuArchitecture;
         boolean defaultCapacityProvider = this.defaultCapacityProvider ? this.defaultCapacityProvider : parent.getDefaultCapacityProvider();
         String networkMode = isNullOrEmpty(this.networkMode) ? parent.getNetworkMode() : this.networkMode;
         String remoteFSRoot = isNullOrEmpty(this.remoteFSRoot) ? parent.getRemoteFSRoot() : this.remoteFSRoot;
@@ -682,6 +801,7 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         int memory = this.memory == 0 ? parent.getMemory() : this.memory;
         int memoryReservation = this.memoryReservation == 0 ? parent.getMemoryReservation() : this.memoryReservation;
         int cpu = this.cpu == 0 ? parent.getCpu() : this.cpu;
+        Integer ephemeralStorageSizeInGiB = this.ephemeralStorageSizeInGiB == null ? parent.getEphemeralStorageSizeInGiB() : this.ephemeralStorageSizeInGiB;
         int sharedMemorySize = this.sharedMemorySize == 0 ? parent.getSharedMemorySize() : this.sharedMemorySize;
         String subnets = isNullOrEmpty(this.subnets) ? parent.getSubnets() : this.subnets;
         String securityGroups = isNullOrEmpty(this.securityGroups) ? parent.getSecurityGroups() : this.securityGroups;
@@ -692,6 +812,7 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         // Bug potential here. If I intenionally set it false in the child, then it will be ignored and take the parent. Need null to mean 'unset'
         boolean privileged = this.privileged ? this.privileged : parent.getPrivileged();
         String containerUser = isNullOrEmpty(this.containerUser) ? parent.getContainerUser() : this.containerUser;
+        String kernelCapabilities = isNullOrEmpty(this.kernelCapabilities) ? parent.getKernelCapabilities() : this.kernelCapabilities;
         String logDriver = isNullOrEmpty(this.logDriver) ? parent.getLogDriver() : this.logDriver;
         String entrypoint = isNullOrEmpty(this.entrypoint) ? parent.getEntrypoint() : this.entrypoint;
 
@@ -700,45 +821,56 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         List<EnvironmentEntry> environments = isEmpty(this.environments) ? parent.getEnvironments() : this.environments;
         List<ExtraHostEntry> extraHosts = isEmpty(this.extraHosts) ? parent.getExtraHosts() : this.extraHosts;
         List<MountPointEntry> mountPoints = isEmpty(this.mountPoints) ? parent.getMountPoints() : this.mountPoints;
+        List<EFSMountPointEntry> efsMountPoints = isEmpty(this.efsMountPoints) ? parent.getEfsMountPoints() : this.efsMountPoints;
         List<PortMappingEntry> portMappings = isEmpty(this.portMappings) ? parent.getPortMappings() : this.portMappings;
         List<PlacementStrategyEntry> placementStrategies = isEmpty(this.placementStrategies) ? parent.getPlacementStrategies() : this.placementStrategies;
         List<CapacityProviderStrategyEntry> capacityProviderStrategies = isEmpty(this.capacityProviderStrategies) ? parent.getCapacityProviderStrategies() : this.capacityProviderStrategies;
          List<TaskPlacementConstraintEntry> taskPlacementConstraints = isEmpty(this.taskPlacementConstraints) ? parent.getTaskPlacementConstraints() : this.taskPlacementConstraints;
         String executionRole = isNullOrEmpty(this.executionRole) ? parent.getExecutionRole() : this.executionRole;
         String taskrole = isNullOrEmpty(this.taskrole) ? parent.getTaskrole() : this.taskrole;
+        boolean enableExecuteCommand = this.enableExecuteCommand ? true : parent.isEnableExecuteCommand();
+
+        HashMap<String,String> tags = this.tags.isEmpty() ? parent.tags : this.tags;
 
         ECSTaskTemplate merged = new ECSTaskTemplate(templateName,
-                                                       label,
-                                                       taskDefinitionOverride,
-                                                       null,
-                                                       image,
-                                                       repositoryCredentials,
-                                                       launchType,
-                                                       defaultCapacityProvider,
-                                                       capacityProviderStrategies,
-                                                       networkMode,
-                                                       remoteFSRoot,
-                                                       uniqueRemoteFSRoot,
-                                                       platformVersion,
-                                                       memory,
-                                                       memoryReservation,
-                                                       cpu,
-                                                       subnets,
-                                                       securityGroups,
-                                                       assignPublicIp,
-                                                       privileged,
-                                                       containerUser,
-                                                       logDriverOptions,
-                                                       environments,
-                                                       extraHosts,
-                                                       mountPoints,
-                                                       portMappings,
-                                                       executionRole,
-                                                       placementStrategies,
-                                                       taskrole,
-                                                       null,
-                                                       sharedMemorySize,
-                                                       taskPlacementConstraints);
+                                                        label,
+                                                        taskDefinitionOverride,
+                                                        null,
+                                                        image,
+                                                        repositoryCredentials,
+                                                        launchType,
+                                                        operatingSystemFamily,
+                                                        cpuArchitecture,
+                                                        defaultCapacityProvider,
+                                                        capacityProviderStrategies,
+                                                        networkMode,
+                                                        remoteFSRoot,
+                                                        uniqueRemoteFSRoot,
+                                                        platformVersion,
+                                                        memory,
+                                                        memoryReservation,
+                                                        cpu,
+                                                        ephemeralStorageSizeInGiB,
+                                                        subnets,
+                                                        securityGroups,
+                                                        assignPublicIp,
+                                                        privileged,
+                                                        containerUser,
+                                                        kernelCapabilities,
+                                                        logDriverOptions,
+                                                        environments,
+                                                        extraHosts,
+                                                        mountPoints,
+                                                        efsMountPoints,
+                                                        portMappings,
+                                                        executionRole,
+                                                        placementStrategies,
+                                                        taskrole,
+                                                        null,
+                                                        taskPlacementConstraints
+                                                        sharedMemorySize,
+                                                        enableExecuteCommand,
+                                                        tags);
         merged.setLogDriver(logDriver);
         merged.setEntrypoint(entrypoint);
 
@@ -783,6 +915,10 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         return mountPoints;
     }
 
+    public List<EFSMountPointEntry> getEfsMountPoints() {
+        return efsMountPoints;
+    }
+
     Collection<Volume> getVolumeEntries() {
         Collection<Volume> vols = new LinkedList<Volume>();
         if (null != mountPoints ) {
@@ -798,24 +934,69 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
                                      .withHost(hostVolume));
             }
         }
+
+        if (null != efsMountPoints) {
+            for (EFSMountPointEntry mount : efsMountPoints) {
+                if (StringUtils.isEmpty(mount.name)) {
+                    continue;
+                }
+
+                EFSAuthorizationConfig efsAuthorizationConfig = null;
+                if (StringUtils.isNotEmpty(mount.accessPointId)) {
+                    efsAuthorizationConfig = new EFSAuthorizationConfig()
+                            .withAccessPointId(mount.accessPointId)
+                            .withIam(BooleanUtils.isTrue(mount.iam)
+                                    ? EFSAuthorizationConfigIAM.ENABLED
+                                    : EFSAuthorizationConfigIAM.DISABLED
+                            );
+                }
+
+                EFSVolumeConfiguration efsVolumeConfiguration = new EFSVolumeConfiguration()
+                        .withFileSystemId(mount.fileSystemId)
+                        .withRootDirectory(mount.rootDirectory)
+                        .withAuthorizationConfig(efsAuthorizationConfig)
+                        .withTransitEncryption(BooleanUtils.isTrue(mount.transitEncryption)
+                                ? EFSTransitEncryption.ENABLED
+                                : EFSTransitEncryption.DISABLED
+                        );
+
+                vols.add(new Volume().withName(mount.name)
+                                     .withEfsVolumeConfiguration(efsVolumeConfiguration));
+            }
+        }
+
         return vols;
     }
 
     Collection<MountPoint> getMountPointEntries() {
-        if (null == mountPoints || mountPoints.isEmpty())
-            return null;
         Collection<MountPoint> mounts = new ArrayList<MountPoint>();
-        for (MountPointEntry mount : mountPoints) {
-            String src = mount.name;
-            String path = mount.containerPath;
-            Boolean ro = mount.readOnly;
-            if (StringUtils.isEmpty(src) || StringUtils.isEmpty(path))
-                continue;
-            mounts.add(new MountPoint().withSourceVolume(src)
-                                       .withContainerPath(path)
-                                       .withReadOnly(ro));
+        if (null != mountPoints) {
+            for (MountPointEntry mount : mountPoints) {
+                String src = mount.name;
+                String path = mount.containerPath;
+                Boolean ro = mount.readOnly;
+                if (StringUtils.isEmpty(src) || StringUtils.isEmpty(path))
+                    continue;
+                mounts.add(new MountPoint().withSourceVolume(src)
+                        .withContainerPath(path)
+                        .withReadOnly(ro));
+            }
         }
-        return mounts;
+
+        if (null != efsMountPoints) {
+            for (EFSMountPointEntry mount : efsMountPoints) {
+                String src = mount.name;
+                String path = mount.containerPath;
+                Boolean ro = mount.readOnly;
+                if (StringUtils.isEmpty(src) || StringUtils.isEmpty(path))
+                    continue;
+                mounts.add(new MountPoint().withSourceVolume(src)
+                        .withContainerPath(path)
+                        .withReadOnly(ro));
+            }
+        }
+
+        return mounts.isEmpty() ? null : mounts;
     }
 
     Collection<PortMapping> getPortMappingEntries() {
@@ -954,6 +1135,108 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
             @Override
             public String getDisplayName() {
                 return "MountPointEntry";
+            }
+        }
+    }
+
+    public static class EFSMountPointEntry extends AbstractDescribableImpl<EFSMountPointEntry> implements Serializable {
+        private static final long serialVersionUID = -7894407420920480113L;
+        public String name, containerPath, fileSystemId, rootDirectory, accessPointId;
+        public Boolean transitEncryption, iam, readOnly;
+
+        @DataBoundConstructor
+        public EFSMountPointEntry(String name,
+                                  String containerPath,
+                                  Boolean readOnly,
+                                  String fileSystemId,
+                                  String rootDirectory,
+                                  String accessPointId,
+                                  Boolean transitEncryption,
+                                  Boolean iam) {
+            this.name = name;
+            this.containerPath = containerPath;
+            this.readOnly = readOnly;
+            this.fileSystemId = fileSystemId;
+            this.rootDirectory = rootDirectory;
+            this.accessPointId = accessPointId;
+            this.transitEncryption = transitEncryption;
+            this.iam = iam;
+        }
+
+        @Override
+        public String toString() {
+            return "EFSMountPointEntry{name:" + name +
+                    ", containerPath:" + containerPath +
+                    ", readOnly:" + readOnly +
+                    ", fileSystemId:" + fileSystemId +
+                    ", rootDirectory:" + rootDirectory +
+                    ", accessPointId:" + accessPointId +
+                    ", transitEncryption:" + transitEncryption +
+                    ", iam:" + iam + "}";
+        }
+
+        @Extension
+        public static class DescriptorImpl extends Descriptor<EFSMountPointEntry> {
+            private static final Logger LOGGER = Logger.getLogger(EFSMountPointEntry.class.getName());
+
+            @Override
+            public String getDisplayName() {
+                return "EFSMountPointEntry";
+            }
+
+            public ListBoxModel doFillFileSystemIdItems(
+                    @RelativePath("../..") @QueryParameter String credentialsId,
+                    @RelativePath("../..") @QueryParameter String regionName
+            ) {
+                EFSService efsService = new EFSService(credentialsId, regionName);
+                try {
+                    List<FileSystemDescription> allFileSystems = efsService.getAllFileSystems();
+                    allFileSystems.sort(Comparator.comparing(FileSystemDescription::getName, Comparator.nullsFirst(Comparator.naturalOrder())));
+                    final ListBoxModel options = new ListBoxModel();
+                    for (final FileSystemDescription fileSystemDescription : allFileSystems) {
+                        options.add(
+                                optionalName(fileSystemDescription.getName(), fileSystemDescription.getFileSystemId()),
+                                fileSystemDescription.getFileSystemId()
+                        );
+                    }
+                    return options;
+                } catch (RuntimeException e) {
+                    LOGGER.log(Level.INFO, "Exception fetching file systems for credentials=" + credentialsId + ", regionName=" + regionName, e);
+                    return new ListBoxModel();
+                }
+            }
+
+            public ListBoxModel doFillAccessPointIdItems(
+                    @RelativePath("../..") @QueryParameter String credentialsId,
+                    @RelativePath("../..") @QueryParameter String regionName,
+                    @QueryParameter String fileSystemId
+            ) {
+                EFSService efsService = new EFSService(credentialsId, regionName);
+                try {
+                    List<AccessPointDescription> accessPoints = efsService.getAccessPointsForFileSystem(fileSystemId);
+                    accessPoints.sort(Comparator.comparing(AccessPointDescription::getName, Comparator.nullsFirst(Comparator.naturalOrder())));
+                    final ListBoxModel options = new ListBoxModel();
+
+                    options.add("None", "");
+                    for (final AccessPointDescription accessPointDescription : accessPoints) {
+                        options.add(
+                                optionalName(accessPointDescription.getName(), accessPointDescription.getAccessPointId()),
+                                accessPointDescription.getAccessPointId()
+                        );
+                    }
+                    return options;
+                } catch (RuntimeException e) {
+                    LOGGER.log(Level.INFO, "Exception fetching access points for credentials=" + credentialsId + ", regionName=" + regionName, e);
+                    return new ListBoxModel();
+                }
+            }
+
+            private String optionalName(String name, String id) {
+                if (StringUtils.isEmpty(name)) {
+                    return id;
+                }
+
+                return name + " (" + id + ")";
             }
         }
     }
@@ -1129,13 +1412,29 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
 
         @Override
         public String getDisplayName() {
-            return Messages.template();
+            return com.cloudbees.jenkins.plugins.amazonecs.Messages.template();
         }
 
         public ListBoxModel doFillLaunchTypeItems() {
             final ListBoxModel options = new ListBoxModel();
             for (LaunchType launchType: LaunchType.values()) {
                 options.add(launchType.toString());
+            }
+            return options;
+        }
+
+        public ListBoxModel doFillOperatingSystemFamilyItems() {
+            final ListBoxModel options = new ListBoxModel();
+            for (OSFamily operatingSystemFamily: OSFamily.values()) {
+                options.add(operatingSystemFamily.toString());
+            }
+            return options;
+        }
+
+        public ListBoxModel doFillCpuArchitectureItems() {
+            final ListBoxModel options = new ListBoxModel();
+            for (CPUArchitecture cpuArchitecture: CPUArchitecture.values()) {
+                options.add(cpuArchitecture.toString());
             }
             return options;
         }
@@ -1169,6 +1468,20 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         public FormValidation doCheckSubnetsLaunchType(@QueryParameter("subnets") String subnets, @QueryParameter("launchType") String launchType) throws IOException, ServletException {
             if (launchType.contentEquals(LaunchType.FARGATE.toString())) {
                 return FormValidation.error("Subnets need to be set, when using FARGATE");
+            }
+            return FormValidation.ok();
+        }
+
+        public FormValidation doCheckOperatingSystemFamilyLaunchType(@QueryParameter("operatingSystemFamily") String operatingSystemFamily, @QueryParameter("launchType") String launchType) throws IOException, ServletException {
+            if (launchType.contentEquals(LaunchType.FARGATE.toString())) {
+                return FormValidation.error("Operating system family need to be set, when using FARGATE");
+            }
+            return FormValidation.ok();
+        }
+
+        public FormValidation doCheckCpuArchitectureLaunchType(@QueryParameter("cpuArchitecture") String cpuArchitecture, @QueryParameter("launchType") String launchType) throws IOException, ServletException {
+            if (launchType.contentEquals(LaunchType.FARGATE.toString())) {
+                return FormValidation.error("CPU architecture need to be set, when using FARGATE");
             }
             return FormValidation.ok();
         }
@@ -1239,6 +1552,9 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         if (cpu != that.cpu) {
             return false;
         }
+        if (!Objects.equals(ephemeralStorageSizeInGiB, that.ephemeralStorageSizeInGiB)) {
+            return false;
+        }
         if (sharedMemorySize != that.sharedMemorySize) {
             return false;
         }
@@ -1296,7 +1612,16 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         if (mountPoints != null ? !mountPoints.equals(that.mountPoints) : that.mountPoints != null) {
             return false;
         }
+        if (efsMountPoints != null ? !efsMountPoints.equals(that.efsMountPoints) : that.efsMountPoints != null) {
+            return false;
+        }
         if (launchType != null ? !launchType.equals(that.launchType) : that.launchType != null) {
+            return false;
+        }
+        if (operatingSystemFamily != null ? !operatingSystemFamily.equals(that.operatingSystemFamily) : that.operatingSystemFamily != null) {
+            return false;
+        }
+        if (cpuArchitecture != null ? !cpuArchitecture.equals(that.cpuArchitecture) : that.cpuArchitecture != null) {
             return false;
         }
         if (defaultCapacityProvider != that.defaultCapacityProvider) {
@@ -1309,6 +1634,9 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
             return false;
         }
         if (containerUser != null ? !containerUser.equals(that.containerUser) : that.containerUser != null) {
+            return false;
+        }
+        if (kernelCapabilities != null ? !kernelCapabilities.equals(that.kernelCapabilities) : that.kernelCapabilities != null) {
             return false;
         }
         if (environments != null ? !environments.equals(that.environments) : that.environments != null) {
@@ -1333,6 +1661,10 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         if (taskPlacementConstraints != null ? !taskPlacementConstraints.equals(that.taskPlacementConstraints) : that.taskPlacementConstraints != null) {
             return false;
         }
+
+        if (tags != null ? !tags.equals(that.tags) : that.tags != null) {
+            return false;
+        }
         return inheritFrom != null ? inheritFrom.equals(that.inheritFrom) : that.inheritFrom == null;
     }
 
@@ -1346,6 +1678,7 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         result = 31 * result + memory;
         result = 31 * result + memoryReservation;
         result = 31 * result + cpu;
+        result = 31 * result + (ephemeralStorageSizeInGiB != null ? ephemeralStorageSizeInGiB : 0);
         result = 31 * result + sharedMemorySize;
         result = 31 * result + (platformVersion != null ? platformVersion.hashCode() : 0);
         result = 31 * result + (subnets != null ? subnets.hashCode() : 0);
@@ -1358,13 +1691,17 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         result = 31 * result + (repositoryCredentials != null ? repositoryCredentials.hashCode() : 0);
         result = 31 * result + (jvmArgs != null ? jvmArgs.hashCode() : 0);
         result = 31 * result + (mountPoints != null ? mountPoints.hashCode() : 0);
+        result = 31 * result + (efsMountPoints != null ? efsMountPoints.hashCode() : 0);
         result = 31 * result + (launchType != null ? launchType.hashCode() : 0);
+        result = 31 * result + (operatingSystemFamily != null ? operatingSystemFamily.hashCode() : 0);
+        result = 31 * result + (cpuArchitecture != null ? cpuArchitecture.hashCode() : 0);
         result = 31 * result + (defaultCapacityProvider ? 1 : 0);
         result = 31 * result + (capacityProviderStrategies != null ? capacityProviderStrategies.hashCode() : 0);
         result = 31 * result + (networkMode != null ? networkMode.hashCode() : 0);
         result = 31 * result + (privileged ? 1 : 0);
         result = 31 * result + (uniqueRemoteFSRoot ? 1 : 0);
         result = 31 * result + (containerUser != null ? containerUser.hashCode() : 0);
+        result = 31 * result + (kernelCapabilities != null ? kernelCapabilities.hashCode() : 0);
         result = 31 * result + (environments != null ? environments.hashCode() : 0);
         result = 31 * result + (extraHosts != null ? extraHosts.hashCode() : 0);
         result = 31 * result + (portMappings != null ? portMappings.hashCode() : 0);
@@ -1373,6 +1710,8 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         result = 31 * result + (logDriverOptions != null ? logDriverOptions.hashCode() : 0);
         result = 31 * result + (inheritFrom != null ? inheritFrom.hashCode() : 0);
         result = 31 * result + (taskPlacementConstraints != null ? taskPlacementConstraints.hashCode() : 0);
+        result = 31 * result + (enableExecuteCommand ? 1 : 0);
+        result = 31 * result + (tags != null ? tags.hashCode() : 0);
         return result;
     }
 }

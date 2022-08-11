@@ -43,6 +43,12 @@
   <f:entry name="launchType" title="${%Launch type}" field="launchType">
     <f:select />
   </f:entry>
+  <f:entry name="operatingSystemFamily" title="${%Operating System Family}" field="operatingSystemFamily">
+    <f:select />
+  </f:entry>
+  <f:entry name="cpuArchitecture" title="${%CPU Architecture}" field="cpuArchitecture">
+    <f:select />
+  </f:entry>
   <f:entry title="${%Default Capacity Provider}" field="defaultCapacityProvider" description="Use Default Capacity Provider. This will ignore Capacity provider strategy and use launch type value to set require capabilities">
     <f:checkbox />
   </f:entry>
@@ -85,6 +91,9 @@
   <f:entry title="${%CPU units}" field="cpu">
     <f:textbox default="1"/>
   </f:entry>
+  <f:entry title="${%Ephemeral Storage (GiB)}" field="ephemeralStorageSizeInGiB">
+    <f:textbox />
+  </f:entry>
   <f:entry title="${%Subnets}" field="subnets" description="List of subnets, separated by comma, only needed when using fargate or awsvpc network mode">
     <f:textbox />
   </f:entry>
@@ -119,7 +128,13 @@
     <f:entry title="${%Unique filesystem root}" field="uniqueRemoteFSRoot">
       <f:checkbox />
     </f:entry>
+    <f:entry title="${%Enable Command Execution}" field="enableExecuteCommand">
+      <f:checkbox />
+    </f:entry>
     <f:entry title="${%ContainerUser}" field="containerUser">
+      <f:textbox />
+    </f:entry>
+    <f:entry title="${%Add Kernel Capabilities}" field="kernelCapabilities" description="List of kernel capabilities to be added, separated by comma">
       <f:textbox />
     </f:entry>
     <f:entry title="${%Logging Driver}" field="logDriver">
@@ -206,6 +221,41 @@
             <f:textbox value="${instance.containerPath}" />
           </f:entry>
           <f:entry title="${%Read Only}" field="readOnly">
+            <f:checkbox />
+          </f:entry>
+          <f:entry title="">
+            <div align="right">
+              <f:repeatableDeleteButton />
+            </div>
+          </f:entry>
+        </table>
+      </f:repeatable>
+    </f:entry>
+    <f:entry title="${%EFS Container Mount Points}">
+      <f:repeatable field="efsMountPoints">
+        <table width="100%">
+          <f:entry title="${%Name}" field="name">
+            <f:textbox value="${instance.name}" />
+          </f:entry>
+          <f:entry title="${%Container Path}" field="containerPath">
+            <f:textbox value="${instance.containerPath}" />
+          </f:entry>
+          <f:entry title="${%Read Only}" field="readOnly">
+            <f:checkbox />
+          </f:entry>
+          <f:entry name="fileSystemId" title="${%File System ID}" field="fileSystemId">
+            <f:select />
+          </f:entry>
+          <f:entry name="accessPointId"  title="${%Access Point ID}" field="accessPointId">
+            <f:select />
+          </f:entry>
+          <f:entry title="${%Root Directory}" field="rootDirectory">
+            <f:textbox value="${instance.rootDirectory}" />
+          </f:entry>
+          <f:entry title="${%Transit Encryption}" field="transitEncryption">
+            <f:checkbox />
+          </f:entry>
+          <f:entry title="${%EFS IAM Authorization}" field="iam">
             <f:checkbox />
           </f:entry>
           <f:entry title="">

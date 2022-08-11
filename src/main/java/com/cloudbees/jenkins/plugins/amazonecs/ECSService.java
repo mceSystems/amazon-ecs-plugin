@@ -28,20 +28,16 @@ package com.cloudbees.jenkins.plugins.amazonecs;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 
-import com.amazonaws.ClientConfiguration;
 import com.amazonaws.auth.AWSStaticCredentialsProvider;
 import com.amazonaws.auth.BasicSessionCredentials;
-import com.amazonaws.regions.Region;
-import com.amazonaws.regions.RegionUtils;
-import com.amazonaws.regions.Regions;
 import com.amazonaws.services.ecs.AmazonECS;
 import com.amazonaws.services.ecs.AmazonECSClientBuilder;
 import com.amazonaws.services.ecs.model.*;
@@ -55,16 +51,14 @@ import com.amazonaws.waiters.FixedDelayStrategy;
 import com.amazonaws.waiters.PollingStrategy;
 import com.amazonaws.waiters.Waiter;
 import com.amazonaws.waiters.WaiterParameters;
+import com.cloudbees.jenkins.plugins.amazonecs.aws.BaseAWSService;
 import com.cloudbees.jenkins.plugins.amazonecs.aws.MaxTimeRetryStrategy;
-import com.cloudbees.jenkins.plugins.awscredentials.AWSCredentialsHelper;
 import com.cloudbees.jenkins.plugins.awscredentials.AmazonWebServicesCredentials;
 
 import org.apache.commons.lang.ObjectUtils;
 import org.apache.commons.lang.StringUtils;
 
 import hudson.AbortException;
-import hudson.ProxyConfiguration;
-import jenkins.model.Jenkins;
 import hudson.slaves.SlaveComputer;
 
 /**
@@ -72,31 +66,20 @@ import hudson.slaves.SlaveComputer;
  *
  * @author Jan Roehrich {@literal <jan@roehrich.info> }
  */
-public class ECSService {
+public class ECSService extends BaseAWSService {
     private static final Logger LOGGER = Logger.getLogger(ECSCloud.class.getName());
+
+    private static final String AWS_TAG_JENKINS_LABEL_KEY = "jenkins.label";
+    private static final String AWS_TAG_JENKINS_TEMPLATENAME_KEY = "jenkins.templatename";
 
     @Nonnull
     private final Supplier<AmazonECS> clientSupplier;
 
     public ECSService(String credentialsId, String assumedRoleArn, String regionName) {
         this.clientSupplier = () -> {
-            ProxyConfiguration proxy = Jenkins.get().proxy;
-            ClientConfiguration clientConfiguration = new ClientConfiguration();
-
-            if (proxy != null) {
-                clientConfiguration.setProxyHost(proxy.name);
-                clientConfiguration.setProxyPort(proxy.port);
-                clientConfiguration.setProxyUsername(proxy.getUserName());
-                clientConfiguration.setProxyPassword(proxy.getPassword());
-            }
-
-            // Default is 3. 10 helps us actually utilize the SDK's backoff strategy
-            // The strategy will wait up to 20 seconds per request (after multiple failures)
-            clientConfiguration.setMaxErrorRetry(10);
-
             AmazonECSClientBuilder builder = AmazonECSClientBuilder
                     .standard()
-                    .withClientConfiguration(clientConfiguration)
+                    .withClientConfiguration(createClientConfiguration())
                     .withRegion(regionName);
 
             AmazonWebServicesCredentials credentials = getCredentials(credentialsId);
@@ -146,19 +129,6 @@ public class ECSService {
 
     AmazonECS getAmazonECSClient() {
         return clientSupplier.get();
-    }
-
-    Region getRegion(String regionName) {
-        if (StringUtils.isNotEmpty(regionName)) {
-            return RegionUtils.getRegion(regionName);
-        } else {
-            return Region.getRegion(Regions.US_EAST_1);
-        }
-    }
-
-    @CheckForNull
-    private AmazonWebServicesCredentials getCredentials(@Nullable String credentialsId) {
-        return AWSCredentialsHelper.getCredentials(credentialsId, Jenkins.get());
     }
 
     public Task describeTask(String taskArn, String clusterArn) {
@@ -261,6 +231,10 @@ public class ECSService {
         if (template.getContainerUser() != null)
             def.withUser(template.getContainerUser());
 
+        if (template.getKernelCapabilities() != null) {
+            def.withLinuxParameters(new LinuxParameters().withCapabilities(new KernelCapabilities().withAdd(Arrays.asList(template.getKernelCapabilities().split(",")))));
+        }
+
         if (template.getRepositoryCredentials() != null)
             def.withRepositoryCredentials(new RepositoryCredentials().withCredentialsParameter(template.getRepositoryCredentials()));
 
@@ -320,11 +294,19 @@ public class ECSService {
             LOGGER.log(Level.FINE, "Task Definition already exists: {0}", new Object[]{currentTaskDefinition.getTaskDefinitionArn()});
             return currentTaskDefinition;
         } else {
+            Tag jenkinsLabelTag = new Tag().withKey(AWS_TAG_JENKINS_LABEL_KEY).withValue(template.getLabel());
+            Tag jenkinsTemplateNameTag =
+                    new Tag().withKey(AWS_TAG_JENKINS_TEMPLATENAME_KEY).withValue(template.getTemplateName());
+            List<Tag> tags = template.getTags();
+            tags.add(jenkinsLabelTag);
+            tags.add(jenkinsTemplateNameTag);
             final RegisterTaskDefinitionRequest request = new RegisterTaskDefinitionRequest()
                     .withFamily(familyName)
                     .withVolumes(template.getVolumeEntries())
                     .withContainerDefinitions(def)
-                    .withPlacementConstraints(template.getPlacementConstraintEntries());
+                    .withPlacementConstraints(template.getPlacementConstraintEntries())
+                    .withTags(tags)
+                    .withContainerDefinitions(def);
 
             //If network mode is default, that means Null in the request, so do not set.
             if (!StringUtils.equals(StringUtils.defaultString(template.getNetworkMode()), "default")) {
@@ -341,10 +323,18 @@ public class ECSService {
 
             if (template.isFargate()) {
                 request
+                        .withRuntimePlatform(new RuntimePlatform()
+                                .withOperatingSystemFamily(template.getOperatingSystemFamily())
+                                .withCpuArchitecture(template.getCpuArchitecture()))
                         .withRequiresCompatibilities(LaunchType.FARGATE.toString())
                         .withNetworkMode(NetworkMode.Awsvpc.toString())
                         .withMemory(String.valueOf(template.getMemoryConstraint()))
                         .withCpu(String.valueOf(template.getCpu()));
+                if (template.getEphemeralStorageSizeInGiB() != null && template.getEphemeralStorageSizeInGiB() > 0) {
+                    request.withEphemeralStorage(new EphemeralStorage()
+                            .withSizeInGiB(template.getEphemeralStorageSizeInGiB())
+                    );
+                }
             }
 
             final RegisterTaskDefinitionResult result = client.registerTaskDefinition(request);
@@ -438,8 +428,15 @@ public class ECSService {
 
         LOGGER.log(Level.FINE, "Found container definition with {0} container(s). Assuming first container is the Jenkins agent: {1}", new Object[]{taskDefinition.getContainerDefinitions().size(), agentContainerName});
 
+        Tag jenkinsLabelTag = new Tag().withKey(AWS_TAG_JENKINS_LABEL_KEY).withValue(template.getLabel());
+        Tag jenkinsTemplateNameTag =
+                new Tag().withKey(AWS_TAG_JENKINS_TEMPLATENAME_KEY).withValue(template.getTemplateName());
+        List<Tag> tags = template.getTags();
+        tags.add(jenkinsLabelTag);
+        tags.add(jenkinsTemplateNameTag);
         RunTaskRequest req = new RunTaskRequest()
                 .withTaskDefinition(taskDefinition.getTaskDefinitionArn())
+                .withTags(tags)
                 .withOverrides(new TaskOverride()
                         .withContainerOverrides(new ContainerOverride()
                                 .withName(agentContainerName)
@@ -456,6 +453,9 @@ public class ECSService {
         }
         if (template.isFargate()) {
             req.withPlatformVersion(template.getPlatformVersion());
+        }
+        if (template.isFargate() || template.isEC2()) {
+            req.setEnableExecuteCommand(template.isEnableExecuteCommand());
         }
 
         if (taskDefinition.getNetworkMode() != null && taskDefinition.getNetworkMode().equals("awsvpc")) {

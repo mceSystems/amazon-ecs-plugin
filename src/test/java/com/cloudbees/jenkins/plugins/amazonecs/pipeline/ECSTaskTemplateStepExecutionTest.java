@@ -18,6 +18,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Random;
 import java.util.UUID;
 
@@ -71,6 +72,8 @@ public class ECSTaskTemplateStepExecutionTest {
                 "image-override",
                 UUID.randomUUID().toString(),
                 UUID.randomUUID().toString(),
+                "LINUX",
+                "X86_64",
                 false,
                 null,
                 UUID.randomUUID().toString(),
@@ -80,11 +83,14 @@ public class ECSTaskTemplateStepExecutionTest {
                 r.nextInt(123),
                 r.nextInt(456),
                 r.nextInt(1024),
+                r.nextInt(200),
                 UUID.randomUUID().toString(),
                 UUID.randomUUID().toString(),
                 r.nextBoolean(),
                 r.nextBoolean(),
                 UUID.randomUUID().toString(),
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -95,7 +101,9 @@ public class ECSTaskTemplateStepExecutionTest {
                 "override-task-role",
                 null,
                 r.nextInt(123),
-                null);
+                null,
+                false,
+                new HashMap<String,String>());
 
         // Overriding the entrypoint is inconsistent... why? You can't do it in the step
 //        expected.setEntrypoint("entrypoint-override");
@@ -105,6 +113,8 @@ public class ECSTaskTemplateStepExecutionTest {
 
         step.setImage(expected.getImage());
         step.setLaunchType(expected.getLaunchType());
+        step.setOperatingSystemFamily(expected.getOperatingSystemFamily());
+        step.setCpuArchitecture(expected.getCpuArchitecture());
         step.setTaskDefinitionOverride(expected.getTaskDefinitionOverride());
         step.setRepositoryCredentials(expected.getRepositoryCredentials());
         step.setNetworkMode(expected.getNetworkMode());
@@ -114,15 +124,18 @@ public class ECSTaskTemplateStepExecutionTest {
         step.setMemory(expected.getMemory());
         step.setMemoryReservation(expected.getMemoryReservation());
         step.setCpu(expected.getCpu());
+        step.setEphemeralStorageSizeInGiB(expected.getEphemeralStorageSizeInGiB());
         step.setSubnets(expected.getSubnets());
         step.setSecurityGroups(expected.getSecurityGroups());
         step.setAssignPublicIp(expected.getAssignPublicIp());
         step.setPrivileged(expected.getPrivileged());
         step.setContainerUser(expected.getContainerUser());
+        step.setKernelCapabilities(expected.getKernelCapabilities());
         step.setLogDriverOptions(expected.getLogDriverOptions());
         step.setEnvironments(expected.getEnvironments());
         step.setExtraHosts(expected.getExtraHosts());
         step.setMountPoints(expected.getMountPoints());
+        step.setEfsMountPoints(expected.getEfsMountPoints());
         step.setPortMappings(expected.getPortMappings());
         step.setExecutionRole(expected.getExecutionRole());
         step.setPlacementStrategies(expected.getPlacementStrategies());
@@ -149,6 +162,8 @@ public class ECSTaskTemplateStepExecutionTest {
                 "image",
                 "repositoryCredentials",
                 "launchType",
+                "operatingSystemFamily",
+                "cpuArchitecture",
                 false,
                 null,
                 "networkMode",
@@ -160,8 +175,11 @@ public class ECSTaskTemplateStepExecutionTest {
                 0,
                 null,
                 null,
+                null,
                 false,
                 false,
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -173,6 +191,8 @@ public class ECSTaskTemplateStepExecutionTest {
                 null,
                 null,
                 0,
-                null);
+                null,
+                false,
+                new HashMap<String,String>());
     }
 }

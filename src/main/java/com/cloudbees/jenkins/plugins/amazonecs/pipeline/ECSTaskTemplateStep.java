@@ -21,9 +21,14 @@ import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.Map;
 
+import com.amazonaws.services.ecs.model.Tag;
 import com.amazonaws.services.ecs.model.LaunchType;
 import com.amazonaws.services.ecs.model.NetworkMode;
+import com.cloudbees.jenkins.plugins.amazonecs.ECSTaskTemplate.EFSMountPointEntry;
 import com.cloudbees.jenkins.plugins.amazonecs.ECSTaskTemplate.EnvironmentEntry;
 import com.cloudbees.jenkins.plugins.amazonecs.ECSTaskTemplate.ExtraHostEntry;
 import com.cloudbees.jenkins.plugins.amazonecs.ECSTaskTemplate.LogDriverOption;
@@ -52,6 +57,8 @@ public class ECSTaskTemplateStep extends Step implements Serializable {
     private String repositoryCredentials;
     private String image;
     private String launchType;
+    private String operatingSystemFamily;
+    private String cpuArchitecture;
     private boolean defaultCapacityProvider;
     private String networkMode;
     private String remoteFSRoot;
@@ -60,25 +67,29 @@ public class ECSTaskTemplateStep extends Step implements Serializable {
     private int memory;
     private int memoryReservation;
     private int cpu;
+    private Integer ephemeralStorageSizeInGiB;
     private int sharedMemorySize;
     private String subnets;
     private String securityGroups;
     private boolean assignPublicIp;
     private boolean privileged;
     private String containerUser;
+    private String kernelCapabilities;
     private String executionRole;
     private String taskrole;
     private String inheritFrom;
+    private boolean enableExecuteCommand;
     private String logDriver;
     private List<LogDriverOption> logDriverOptions;
     private List<EnvironmentEntry> environments;
     private List<ExtraHostEntry> extraHosts;
     private List<MountPointEntry> mountPoints;
+    private List<EFSMountPointEntry> efsMountPoints;
     private List<PortMappingEntry> portMappings;
     private List<PlacementStrategyEntry> placementStrategies;
     private List<CapacityProviderStrategyEntry> capacityProviderStrategies;
     List<TaskPlacementConstraintEntry> taskPlacementConstraints;
-
+    private HashMap<String,String> tags = new HashMap<String,String>();
     private List<String> overrides;
 
     @DataBoundConstructor
@@ -139,6 +150,25 @@ public class ECSTaskTemplateStep extends Step implements Serializable {
 
     public String getLaunchType() {
         return launchType;
+    }
+
+
+    @DataBoundSetter
+    public void setOperatingSystemFamily(String operatingSystemFamily) {
+        this.operatingSystemFamily = operatingSystemFamily;
+    }
+
+    public String getOperatingSystemFamily() {
+        return operatingSystemFamily;
+    }
+
+    @DataBoundSetter
+    public void setCpuArchitecture(String cpuArchitecture) {
+        this.cpuArchitecture = cpuArchitecture;
+    }
+
+    public String getCpuArchitecture() {
+        return cpuArchitecture;
     }
 
     @DataBoundSetter
@@ -205,6 +235,15 @@ public class ECSTaskTemplateStep extends Step implements Serializable {
     }
 
     @DataBoundSetter
+    public void setEphemeralStorageSizeInGiB(Integer ephemeralStorageSizeInGiB) {
+        this.ephemeralStorageSizeInGiB = ephemeralStorageSizeInGiB;
+    }
+
+    public Integer getEphemeralStorageSizeInGiB() {
+        return ephemeralStorageSizeInGiB;
+    }
+
+    @DataBoundSetter
     public void setSharedMemorySize(int sharedMemorySize) {
         this.sharedMemorySize = sharedMemorySize;
     }
@@ -268,6 +307,15 @@ public class ECSTaskTemplateStep extends Step implements Serializable {
     }
 
     @DataBoundSetter
+    public void setKernelCapabilities(String kernelCapabilities) {
+        this.kernelCapabilities = kernelCapabilities;
+    }
+
+    public String getKernelCapabilities() {
+        return kernelCapabilities;
+    }
+
+    @DataBoundSetter
     public void setExecutionRole(String executionRole) {
         this.executionRole = executionRole;
     }
@@ -292,6 +340,15 @@ public class ECSTaskTemplateStep extends Step implements Serializable {
 
     public String getInheritFrom() {
         return inheritFrom;
+    }
+
+    @DataBoundSetter
+    public void setEnableExecuteCommand(boolean enableExecuteCommand) {
+        this.enableExecuteCommand = enableExecuteCommand;
+    }
+
+    public boolean getEnableExecuteCommand() {
+        return enableExecuteCommand;
     }
 
     public String getLogDriver() {
@@ -339,6 +396,15 @@ public class ECSTaskTemplateStep extends Step implements Serializable {
         this.mountPoints = mountPoints;
     }
 
+    public List<EFSMountPointEntry> getEfsMountPoints() {
+        return efsMountPoints;
+    }
+
+    @DataBoundSetter
+    public void setEfsMountPoints(List<EFSMountPointEntry> efsMountPoints) {
+        this.efsMountPoints = efsMountPoints;
+    }
+
     public List<PortMappingEntry> getPortMappings() {
         return portMappings;
     }
@@ -365,7 +431,11 @@ public class ECSTaskTemplateStep extends Step implements Serializable {
     public void setCapacityProviderStrategy(List<CapacityProviderStrategyEntry> capacityProviderStrategies) {
         this.capacityProviderStrategies = capacityProviderStrategies;
     }
-    
+
+    public  HashMap<String,String> getTags() { return tags; }
+
+    @DataBoundSetter
+    public void setTags(HashMap<String,String> tags) { this.tags = tags; }
 
     @DataBoundSetter
     public void setOverrides(List<String> overrides) {

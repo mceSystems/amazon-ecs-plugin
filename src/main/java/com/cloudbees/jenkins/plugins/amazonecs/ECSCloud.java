@@ -96,6 +96,8 @@ public class ECSCloud extends Cloud {
     private int maxCpu;
     private int maxMemory;
     private int maxMemoryReservation;
+    private int maxAgents = DescriptorImpl.DEFAULT_MAXIMUM_AGENTS;
+    private int numExecutors;
 
     @DataBoundConstructor
     public ECSCloud(String name, @Nonnull String credentialsId, String assumedRoleArn, String cluster) {
@@ -212,6 +214,16 @@ public class ECSCloud extends Cloud {
         return getTemplate(label) != null;
     }
 
+    public boolean isAtLimit(int onlineExecutors, int connectingExecutors) {
+       // maxAgents equals 0 indicates that we don't have restriction on number of nodes.
+        if (maxAgents != 0) {
+            if (onlineExecutors + connectingExecutors >= maxAgents ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private ECSTaskTemplate getTemplate(Label label) {
         if (label == null) {
             return null;
@@ -272,8 +284,15 @@ public class ECSCloud extends Cloud {
             for (int i = 1; i <= toBeProvisioned; i++) {
                 String agentName = name + "-" + label.getName() + "-" + RandomStringUtils.random(5, "bcdfghjklmnpqrstvwxz0123456789");
                 LOGGER.log(Level.INFO, "Will provision {0}, for label: {1}", new Object[]{agentName, label} );
-
-                result.add(new NodeProvisioner.PlannedNode(template.getDisplayName(), Computer.threadPoolForRemoting.submit(new ProvisioningCallback(merged, agentName)), 1));
+                result.add(
+                        new NodeProvisioner.PlannedNode(
+                                agentName,
+                                Computer.threadPoolForRemoting.submit(
+                                        new ProvisioningCallback(merged, agentName)
+                                ),
+                                numExecutors
+                        )
+                );
             }
         }
         return result.isEmpty() ? Collections.emptyList() : result;
@@ -347,6 +366,15 @@ public class ECSCloud extends Cloud {
         this.maxCpu = maxCpu;
     }
 
+    public int getNumExecutors() {
+        return numExecutors;
+    }
+
+    @DataBoundSetter
+    public void setNumExecutors(int numExecutors) {
+        this.numExecutors = numExecutors;
+    }
+
     public int getMaxMemory() {
         return maxMemory;
     }
@@ -363,6 +391,15 @@ public class ECSCloud extends Cloud {
     @DataBoundSetter
     public void setMaxMemoryReservation(int maxMemoryReservation) {
         this.maxMemoryReservation = maxMemoryReservation;
+    }
+
+    public int getMaxAgents() {
+        return maxAgents;
+    }
+
+    @DataBoundSetter
+    public void setMaxAgents(int maxAgents) {
+        this.maxAgents = maxAgents;
     }
 
     public void addTemplate(ECSTaskTemplate taskTemplate) {
@@ -416,9 +453,9 @@ public class ECSCloud extends Cloud {
     /**
      * Adds a dynamic task template. Won't be displayed in UI, and persisted
      * separately from the cloud instance. Also creates a task definition for this
-     * template, adding the ARN to back to the template so that we can delete the 
+     * template, adding the ARN to back to the template so that we can delete the
      * exact task created once complete.
-     * 
+     *
      * @param template the template to add
      * @return the task template with the newly created task definition ARN added
      */
@@ -436,7 +473,7 @@ public class ECSCloud extends Cloud {
      * Remove a dynamic task template.
      * @param template the template to remove
      */
-    public void removeDynamicTemplate(ECSTaskTemplate template) {	
+    public void removeDynamicTemplate(ECSTaskTemplate template) {
         getEcsService().removeTemplate(template);
 
         TaskTemplateMap.get().removeTemplate(this, template);
@@ -449,6 +486,7 @@ public class ECSCloud extends Cloud {
         public static final int DEFAULT_TASK_POLLING_INTERVAL_IN_SECONDS = 1;
         public static final String DEFAULT_ALLOWED_OVERRIDES = "";
         private static String CLOUD_NAME_PATTERN = "[a-z|A-Z|0-9|_|-]{1,127}";
+        private static final int DEFAULT_MAXIMUM_AGENTS = 0; //Unlimited
 
         @Override
         public String getDisplayName() {

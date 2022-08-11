@@ -5,7 +5,6 @@ import com.amazonaws.services.ecs.model.TaskDefinition;
 import hudson.model.labels.LabelAtom;
 import hudson.slaves.NodeProvisioner.PlannedNode;
 import static junit.framework.TestCase.assertEquals;
-import static junit.framework.TestCase.assertNull;
 import static junit.framework.TestCase.assertTrue;
 import org.junit.Assert;
 import org.junit.Rule;
@@ -16,12 +15,12 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
+import java.util.HashMap;
 
 
 public class ECSCloudTest {
@@ -38,6 +37,7 @@ public class ECSCloudTest {
         ECSCloud sut = new ECSCloud("mycloud", "", "", "mycluster");
         sut.setTemplates(templates);
         sut.setRegionName("eu-west-1");
+        sut.setNumExecutors(1);
         sut.setJenkinsUrl("http://jenkins.local");
         sut.setSlaveTimeoutInSeconds(5);
         sut.setRetentionTimeout(5);
@@ -54,6 +54,7 @@ public class ECSCloudTest {
         ECSCloud sut = new ECSCloud("mycloud", "", "", "mycluster");
         sut.setTemplates(templates);
         sut.setRegionName("eu-west-1");
+        sut.setNumExecutors(1);
         sut.setJenkinsUrl("http://jenkins.local");
         sut.setSlaveTimeoutInSeconds(5);
         sut.setRetentionTimeout(5);
@@ -115,7 +116,7 @@ public class ECSCloudTest {
     public void removeJunkTemplateProducesNoError() throws Exception {
         ECSService ecsService = mock(ECSService.class);
         when(ecsService.findTaskDefinition(anyString())).thenReturn(null);
-        ECSCloud cloud = new ECSCloud("mycloud", "mycluster",ecsService);
+        ECSCloud cloud = new ECSCloud("mycloud", "mycluster", ecsService);
         cloud.setRegionName("us-east-1");
         cloud.removeDynamicTemplate(getTaskTemplate(Math.random() + "", "label1, label2, label3"));
     }
@@ -137,6 +138,49 @@ public class ECSCloudTest {
         Assert.assertTrue(sut.isAllowedOverride("label"));
     }
 
+    @Test
+    public void isAtLimit_returnsTrue () {
+        int onlineExecutors = 6;
+        int connectingExecutors = 2;
+
+        List<ECSTaskTemplate> templates = new ArrayList<>();
+        templates.add(getTaskTemplate("my-template","label"));
+
+        ECSCloud sut = new ECSCloud("mycloud", "", "", "mycluster");
+        sut.setMaxAgents(3);
+        sut.setTemplates(templates);
+        sut.setRegionName("eu-west-1");
+        sut.setNumExecutors(1);
+        sut.setJenkinsUrl("http://jenkins.local");
+        sut.setSlaveTimeoutInSeconds(5);
+        sut.setRetentionTimeout(5);
+
+        Boolean isAtLimit = sut.isAtLimit(onlineExecutors, connectingExecutors);
+
+        Assert.assertTrue(isAtLimit);
+    }
+
+    @Test
+    public void isAtLimit_returnsFalse () {
+        int onlineExecutors = 3;
+        int connectingExecutors = 0;
+
+        List<ECSTaskTemplate> templates = new ArrayList<>();
+        templates.add(getTaskTemplate("my-template","label"));
+
+        ECSCloud sut = new ECSCloud("mycloud", "", "", "mycluster");
+        sut.setTemplates(templates);
+        sut.setRegionName("eu-west-1");
+        sut.setNumExecutors(1);
+        sut.setJenkinsUrl("http://jenkins.local");
+        sut.setSlaveTimeoutInSeconds(5);
+        sut.setRetentionTimeout(5);
+
+        Boolean isAtLimit = sut.isAtLimit(onlineExecutors, connectingExecutors);
+
+        Assert.assertFalse(isAtLimit);
+    }
+
     private ECSTaskTemplate getTaskTemplate() {
         return getTaskTemplate(UUID.randomUUID().toString(),UUID.randomUUID().toString());
     }
@@ -149,6 +193,8 @@ public class ECSCloudTest {
                 "image",
                 "repositoryCredentials",
                 "launchType",
+                "operatingSystemFamily",
+                "cpuArchitecture",
                 false,
                 null,
                 "networkMode",
@@ -160,8 +206,11 @@ public class ECSCloudTest {
                 0,
                 null,
                 null,
+                null,
                 false,
                 false,
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -173,6 +222,8 @@ public class ECSCloudTest {
                 null,
                 null,
                 0,
-                null);
+                null
+                false,
+                new HashMap<String,String>());
     }
 }

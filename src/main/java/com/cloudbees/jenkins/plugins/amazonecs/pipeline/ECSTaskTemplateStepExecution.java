@@ -1,7 +1,5 @@
 package com.cloudbees.jenkins.plugins.amazonecs.pipeline;
 
-import com.amazonaws.services.codedeploy.model.ECSService;
-import com.amazonaws.services.ecs.model.TaskDefinition;
 import com.cloudbees.jenkins.plugins.amazonecs.ECSCloud;
 import com.cloudbees.jenkins.plugins.amazonecs.ECSTaskTemplate;
 import com.cloudbees.jenkins.plugins.amazonecs.SerializableSupplier;
@@ -61,6 +59,8 @@ public class ECSTaskTemplateStepExecution extends AbstractStepExecutionImpl {
                                           step.getImage(),
                                           step.getRepositoryCredentials(),
                                           step.getLaunchType(),
+                                          step.getOperatingSystemFamily(),
+                                          step.getCpuArchitecture(),
                                           step.getDefaultCapacityProvider(),
                                           step.getCapacityProviderStrategies(),
                                           step.getNetworkMode(),
@@ -70,22 +70,27 @@ public class ECSTaskTemplateStepExecution extends AbstractStepExecutionImpl {
                                           step.getMemory(),
                                           step.getMemoryReservation(),
                                           step.getCpu(),
+                                          step.getEphemeralStorageSizeInGiB(),
                                           step.getSubnets(),
                                           step.getSecurityGroups(),
                                           step.getAssignPublicIp(),
                                           step.getPrivileged(),
                                           step.getContainerUser(),
+                                          step.getKernelCapabilities(),
                                           step.getLogDriverOptions(),
                                           step.getEnvironments(),
                                           step.getExtraHosts(),
                                           step.getMountPoints(),
+                                          step.getEfsMountPoints(),
                                           step.getPortMappings(),
                                           step.getExecutionRole(),
                                           step.getPlacementStrategies(),
                                           step.getTaskrole(),
                                           step.getInheritFrom(),
                                           step.getSharedMemorySize(),
-                                          step.getTaskPlacementConstraints());
+                                          step.getTaskPlacementConstraints(),
+                                          step.getEnableExecuteCommand(),
+                                          step.getTags());
         newTemplate.setLogDriver(step.getLogDriver());
 
         ECSTaskTemplate parentTemplate = ecsCloud.findParentTemplate(parentLabel);
