@@ -401,9 +401,9 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
                            @Nullable String taskrole,
                            @Nullable String inheritFrom,
                            int sharedMemorySize,
-                           @Nullable List<TaskPlacementConstraintEntry> taskPlacementConstraints,
                            boolean enableExecuteCommand,
-                           HashMap<String,String> tags) {
+                           HashMap<String,String> tags,
+                           @Nullable List<TaskPlacementConstraintEntry> taskPlacementConstraints) {
         // if the user enters a task definition override, always prefer to use it, rather than the jenkins template.
         if (taskDefinitionOverride != null && !taskDefinitionOverride.trim().isEmpty()) {
             this.taskDefinitionOverride = taskDefinitionOverride.trim();
@@ -453,9 +453,9 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         this.inheritFrom = inheritFrom;
         this.sharedMemorySize = sharedMemorySize;
         this.dynamicTaskDefinitionOverride = StringUtils.trimToNull(dynamicTaskDefinitionOverride);
-        this.taskPlacementConstraints = taskPlacementConstraints;
         this.enableExecuteCommand = enableExecuteCommand;
         this.tags = (tags == null ? new HashMap<String,String>() : tags);
+        this.taskPlacementConstraints = taskPlacementConstraints;
     }
 
     @DataBoundSetter
@@ -867,10 +867,10 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
                                                         placementStrategies,
                                                         taskrole,
                                                         null,
-                                                        taskPlacementConstraints
                                                         sharedMemorySize,
                                                         enableExecuteCommand,
-                                                        tags);
+                                                        tags,
+                                                        taskPlacementConstraints);
         merged.setLogDriver(logDriver);
         merged.setEntrypoint(entrypoint);
 
@@ -1658,13 +1658,14 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
             return false;
         }
 
+        if (tags != null ? !tags.equals(that.tags) : that.tags != null) {
+            return false;
+        }
+
         if (taskPlacementConstraints != null ? !taskPlacementConstraints.equals(that.taskPlacementConstraints) : that.taskPlacementConstraints != null) {
             return false;
         }
 
-        if (tags != null ? !tags.equals(that.tags) : that.tags != null) {
-            return false;
-        }
         return inheritFrom != null ? inheritFrom.equals(that.inheritFrom) : that.inheritFrom == null;
     }
 
@@ -1709,9 +1710,9 @@ public class ECSTaskTemplate extends AbstractDescribableImpl<ECSTaskTemplate> im
         result = 31 * result + (logDriver != null ? logDriver.hashCode() : 0);
         result = 31 * result + (logDriverOptions != null ? logDriverOptions.hashCode() : 0);
         result = 31 * result + (inheritFrom != null ? inheritFrom.hashCode() : 0);
-        result = 31 * result + (taskPlacementConstraints != null ? taskPlacementConstraints.hashCode() : 0);
         result = 31 * result + (enableExecuteCommand ? 1 : 0);
         result = 31 * result + (tags != null ? tags.hashCode() : 0);
+        result = 31 * result + (taskPlacementConstraints != null ? taskPlacementConstraints.hashCode() : 0);
         return result;
     }
 }

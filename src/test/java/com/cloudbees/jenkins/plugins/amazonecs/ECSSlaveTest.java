@@ -111,8 +111,8 @@ public class ECSSlaveTest {
             null,
             null,
             0,
-			null,
             false,
-             new HashMap<String,String>());
+            new HashMap<String,String>(),
+            null);
     }
 }

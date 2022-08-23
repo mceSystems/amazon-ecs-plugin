@@ -290,7 +290,7 @@ public class ECSCloud extends Cloud {
                                 Computer.threadPoolForRemoting.submit(
                                         new ProvisioningCallback(merged, agentName)
                                 ),
-                                numExecutors
+                                1
                         )
                 );
             }
