@@ -303,7 +303,6 @@ public class ECSService extends BaseAWSService {
             final RegisterTaskDefinitionRequest request = new RegisterTaskDefinitionRequest()
                     .withFamily(familyName)
                     .withVolumes(template.getVolumeEntries())
-                    .withContainerDefinitions(def)
                     .withPlacementConstraints(template.getPlacementConstraintEntries())
                     .withTags(tags)
                     .withContainerDefinitions(def);
